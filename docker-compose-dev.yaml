@@ -1,0 +1,150 @@
+version: "3.9"
+
+services:
+  scylla:
+    image: scylladb/scylla:6.1
+    container_name: analytics_scylla
+    command: >
+      --smp 1
+      --memory 2G
+      --overprovisioned 1
+      --api-address 0.0.0.0
+      --skip-wait-for-gossip-to-settle 0
+      --disable-version-check
+    ports:
+      - "${SCYLLA_PORT:-9042}:9042"
+    volumes:
+      - scylla_data:/var/lib/scylla
+    networks:
+      - backend_net
+    restart: unless-stopped
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD-SHELL", "nodetool status | grep -E '^UN' >/dev/null 2>&1"]
+      interval: 15s
+      retries: 10
+      start_period: 15s
+
+
+  clickhouse:
+    image: clickhouse/clickhouse-server:23.10-alpine
+    container_name: analytics_clickhouse
+    ulimits:
+      nofile:
+        soft: 262144
+        hard: 262144
+    volumes:
+      - clickhouse_data:/var/lib/clickhouse
+      - ../data:/data
+    ports:
+      - "${CLICKHOUSE_PORT:-9000}:9000"
+      - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
+    networks:
+      - backend_net
+    restart: unless-stopped
+    env_file:
+      - .env
+    healthcheck:
+      test: "clickhouse-client -q 'SELECT 1'"
+      interval: 10s
+      retries: 10
+      start_period: 30s
+
+  redis:
+    image: redis:7-alpine
+    container_name: analytics_redis
+    command: redis-server --requirepass ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    networks:
+      - backend_net
+    restart: unless-stopped
+    env_file:
+      - .env
+    healthcheck:
+      test: "redis-cli -a ${REDIS_PASSWORD} ping"
+      interval: 10s
+      retries: 5
+
+  nats:
+    image: nats:2.9.23-alpine
+    container_name: analytics_nats
+    command: "-DV --user ${NATS_USER} --pass ${NATS_PASSWORD} -m 8222"
+    ports:
+      - "${NATS_PORT:-4222}:4222"
+      - "8222:8222"
+    networks:
+      - backend_net
+    restart: unless-stopped
+    env_file:
+      - .env
+    healthcheck:
+      test: "wget --no-verbose --tries=1 --spider http://localhost:8222/healthz"
+      interval: 5s
+      retries: 5
+      timeout: 3s
+
+  scylla-init:
+    container_name: scylla-init
+    image: scylladb/scylla-cqlsh:latest
+    working_dir: /scripts
+    volumes:
+      - ../scripts:/scripts
+    entrypoint: ["bash", "/scripts/init-scylla.sh"]
+    env_file:
+      - .env
+    depends_on:
+      scylla:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: "no"
+
+  clickhouse-init:
+    container_name: clickhouse-init
+    image: clickhouse/clickhouse-server:23.10-alpine
+    working_dir: /scripts
+    volumes:
+      - ../scripts:/scripts
+      - ../data:/data
+      - ../src/cli:/cli
+    entrypoint: ["bash", "/scripts/init-clickhouse.sh"]
+    env_file:
+      - .env
+    depends_on:
+      clickhouse:
+        condition: service_healthy
+    networks:
+      - backend_net
+    restart: "no"
+
+  backend:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: analytics_backend
+    env_file:
+      - .env
+    ports:
+      - "${FASTAPI_PORT:-8000}:8000"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      scylla-init:
+        condition: service_completed_successfully
+      clickhouse-init:
+        condition: service_completed_successfully
+    networks:
+      - backend_net
+    restart: unless-stopped
+
+networks:
+  backend_net:
+    driver: bridge
+
+volumes:
+  scylla_data:
+  clickhouse_data:
