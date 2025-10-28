@@ -1,5 +1,3 @@
-version: "3.9"
-
 services:
   scylla:
     image: scylladb/scylla:6.1
@@ -21,11 +19,10 @@ services:
     env_file:
       - .env
     healthcheck:
-      test: ["CMD-SHELL", "nodetool status | grep -E '^UN' >/dev/null 2>&1"]
+      test: ["CMD-SHELL", "cqlsh -u $${SCYLLA_USER} -p $${SCYLLA_PASSWORD} -e 'SELECT now() FROM system.local;' >/dev/null 2>&1"]
       interval: 15s
       retries: 10
-      start_period: 15s
-
+      start_period: 60s
 
   clickhouse:
     image: clickhouse/clickhouse-server:23.10-alpine
@@ -36,7 +33,7 @@ services:
         hard: 262144
     volumes:
       - clickhouse_data:/var/lib/clickhouse
-      - ../data:/data
+      - ./data:/data
     ports:
       - "${CLICKHOUSE_PORT:-9000}:9000"
       - "${CLICKHOUSE_HTTP_PORT:-8123}:8123"
@@ -48,29 +45,19 @@ services:
     healthcheck:
       test: "clickhouse-client -q 'SELECT 1'"
       interval: 10s
+      timeout: 5s
       retries: 10
       start_period: 30s
-
-  redis:
-    image: redis:7-alpine
-    container_name: analytics_redis
-    command: redis-server --requirepass ${REDIS_PASSWORD}
-    ports:
-      - "${REDIS_PORT:-6379}:6379"
-    networks:
-      - backend_net
-    restart: unless-stopped
-    env_file:
-      - .env
-    healthcheck:
-      test: "redis-cli -a ${REDIS_PASSWORD} ping"
-      interval: 10s
-      retries: 5
 
   nats:
     image: nats:2.9.23-alpine
     container_name: analytics_nats
-    command: "-DV --user ${NATS_USER} --pass ${NATS_PASSWORD} -m 8222"
+    command: >
+      -DV
+      --user ${NATS_USER} --pass ${NATS_PASSWORD}
+      -m 8222
+      --jetstream
+      --store_dir /data
     ports:
       - "${NATS_PORT:-4222}:4222"
       - "8222:8222"
@@ -79,18 +66,20 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - nats_data:/data
     healthcheck:
-      test: "wget --no-verbose --tries=1 --spider http://localhost:8222/healthz"
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8222/healthz"]
       interval: 5s
-      retries: 5
       timeout: 3s
+      retries: 5
 
   scylla-init:
     container_name: scylla-init
     image: scylladb/scylla-cqlsh:latest
     working_dir: /scripts
     volumes:
-      - ../scripts:/scripts
+      - ./scripts:/scripts
     entrypoint: ["bash", "/scripts/init-scylla.sh"]
     env_file:
       - .env
@@ -106,9 +95,9 @@ services:
     image: clickhouse/clickhouse-server:23.10-alpine
     working_dir: /scripts
     volumes:
-      - ../scripts:/scripts
-      - ../data:/data
-      - ../src/cli:/cli
+      - ./scripts:/scripts
+      - ./data:/data
+      - ./src/cli:/cli
     entrypoint: ["bash", "/scripts/init-clickhouse.sh"]
     env_file:
       - .env
@@ -119,18 +108,45 @@ services:
       - backend_net
     restart: "no"
 
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    env_file:
+      - .env
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+
+  data-importer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: data-importer
+    volumes:
+      - ./data:/data
+    command: [ "uv", "run", "python", "src/cli/import_events.py", "/data/events_sample.csv" ]
+    env_file:
+      - .env
+    depends_on:
+      clickhouse-init:
+        condition: service_completed_successfully
+    networks:
+      - backend_net
+    restart: "no"
+
   backend:
     build:
-      context: ..
+      context: .
       dockerfile: docker/Dockerfile
     container_name: analytics_backend
     env_file:
       - .env
     ports:
-      - "${FASTAPI_PORT:-8000}:8000"
+      - "${LITESTAR_PORT:-8000}:8000"
+    volumes:
+      - ./logs:/app/logs
     depends_on:
-      redis:
-        condition: service_healthy
       nats:
         condition: service_healthy
       scylla-init:
@@ -140,6 +156,30 @@ services:
     networks:
       - backend_net
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:${LITESTAR_PORT:-8000}/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    container_name: analytics_worker
+    depends_on:
+      scylla:
+        condition: service_healthy
+      nats:
+        condition: service_healthy
+      clickhouse:
+        condition: service_healthy
+    env_file:
+      - .env
+    working_dir: /app
+    command: uv run python src/app/workers/db_worker.py
+    networks:
+      - backend_net
 
 networks:
   backend_net:
@@ -148,3 +188,4 @@ networks:
 volumes:
   scylla_data:
   clickhouse_data:
+  nats_data:

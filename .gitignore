@@ -1,0 +1,6 @@
+/.idea
+/logs
+/src/app/api/__pycache__
+*.pyc
+/.venv
+.env

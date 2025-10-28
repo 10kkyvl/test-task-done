@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict
+from typing import Dict, Any
 
 
 class Broker(ABC):
@@ -8,7 +8,7 @@ class Broker(ABC):
         pass
 
     @abstractmethod
-    async def publish(self):
+    async def publish(self, subject: str, message: Dict[str, Any]):
         pass
 
     @abstractmethod
@@ -19,3 +19,6 @@ class Broker(ABC):
     async def close(self):
         pass
 
+    @abstractmethod
+    async def shutdown(self):
+        pass
