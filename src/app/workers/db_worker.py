@@ -28,7 +28,8 @@ NATS_PASSWORD = os.getenv("NATS_PASSWORD", "super_secure_nats_pass")
 CLICKHOUSE_HOST = os.getenv("CLICKHOUSE_HOST", "analytics_clickhouse")
 CLICKHOUSE_PORT = int(os.getenv("CLICKHOUSE_HTTP_PORT", 8123))
 CLICKHOUSE_DB = os.getenv("CLICKHOUSE_KEYSPACE", "analytics")
-
+CLICKHOUSE_USER = os.getenv("CLICKHOUSE_USER", "clickhouse")
+CLICKHOUSE_PASSWORD = os.getenv("CLICKHOUSE_PASSWORD", "clickhouse")
 
 BATCH_SIZE = 50_000
 executor = ThreadPoolExecutor(max_workers=10)
@@ -54,6 +55,9 @@ def connect_clickhouse():
         host=CLICKHOUSE_HOST,
         port=CLICKHOUSE_PORT,
         database=CLICKHOUSE_DB,
+        username=CLICKHOUSE_USER,
+        password=CLICKHOUSE_PASSWORD
+        
     )
     logger.info("Connected to ClickHouse")
     return client

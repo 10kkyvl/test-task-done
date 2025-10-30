@@ -12,9 +12,9 @@ from nats.js.client import JetStreamContext
 
 from src.app.core.logger import logger
 from src.app.core.config import settings
+from src.app.broker.base import Broker
 
-
-class Nats:
+class Nats(Broker):
     def __init__(self, url: str = settings.nats.url):
         self.url = url
         self.client = NATS()

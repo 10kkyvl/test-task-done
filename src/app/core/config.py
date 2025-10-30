@@ -37,8 +37,11 @@ class NatsSettings:
 
 @dataclass
 class ClickhouseSettings:
+    database: str
     host: str
     port: int
+    user: str
+    password: str
     http_port: int
 
     @property
@@ -83,7 +86,10 @@ def load_settings() -> Settings:
             password=os.getenv("NATS_PASSWORD", "super_secure_nats_pass"),
         ),
         clickhouse=ClickhouseSettings(
+            database=os.getenv("CLICKHOUSE_KEYSPACE", "analytics"),
             host=os.getenv("CLICKHOUSE_HOST", "clickhouse"),
+            user=os.getenv("CLICKHOUSE_USER", "clickhouse"),
+            password=os.getenv("CLICKHOUSE_PASSWORD", "clickhouse"),
             port=int(os.getenv("CLICKHOUSE_PORT", "9000")),
             http_port=int(os.getenv("CLICKHOUSE_HTTP_PORT", "8123")),
         ),

@@ -2,13 +2,13 @@ from typing import List
 from msgspec import json, DecodeError, ValidationError
 from litestar.exceptions import HTTPException
 
-from src.app.broker.nats import Nats
+from src.app.broker.base import Broker
 from src.app.schemas.events import EventInput
 from src.app.core.logger import logger
 
 
 class EventService:
-    def __init__(self, broker: Nats):
+    def __init__(self, broker: Broker):
         self._broker = broker
 
     async def ingest(self, raw_body: bytes) -> int:

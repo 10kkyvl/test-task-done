@@ -5,16 +5,17 @@ import clickhouse_connect
 from clickhouse_connect.driver.asyncclient import AsyncClient
 
 from src.app.db.base import BaseDatabase
+from src.app.core.config import settings
 
 
 class ClickHouse(BaseDatabase):
     def __init__(self):
         self._client: Optional[AsyncClient] = None
-        self._host = os.getenv("CLICKHOUSE_HOST", "localhost")
-        self._port = int(os.getenv("CLICKHOUSE_HTTP_PORT", "8123"))
-        self._user = os.getenv("CLICKHOUSE_USER", "default")
-        self._password = os.getenv("CLICKHOUSE_PASSWORD", "")
-        self._database = os.getenv("CLICKHOUSE_KEYSPACE", "analytics")
+        self._host = settings.clickhouse.host
+        self._port = settings.clickhouse.http_port
+        self._user = settings.clickhouse.user
+        self._password = settings.clickhouse.password
+        self._database = settings.clickhouse.database
 
     async def connect(self) -> AsyncClient:
         if self._client is None:
